@@ -7,6 +7,8 @@ from http import HTTPStatus
 import requests
 import telegram
 from dotenv import load_dotenv
+from simplejson.errors import JSONDecodeError
+from telegram.error import TelegramError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,23 +44,29 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.info(f'Message send: {message}')
-    except Exception as error:
+    except TelegramError as error:
         logger.error(f'Failed sending message: {error}')
 
 
 def get_api_answer(current_timestamp):
     """Отправляем запрос к API."""
     params = {'from_date': current_timestamp}
-    response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    if response.status_code != HTTPStatus.OK:
-        raise Exception('Failed request to API')
-    logger.info('Got response')
-    return response.json()
+    try:
+        response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+        if response.status_code != HTTPStatus.OK:
+            logger.error('Failed request to API')
+            raise requests.exceptions.RequestException
+        logger.info('Got response')
+        return response.json()
+    except JSONDecodeError:
+        logger.error('JSON Decode Error')
 
 
 def check_response(response):
     """Проверяем ответ API на корректность."""
     homework = response['homeworks']
+    if 'homeworks' not in response:
+        raise KeyError("Key is not in dict")
     if homework is None:
         raise Exception("Homeworks not found")
     if (type(homework) != list):
@@ -88,32 +96,34 @@ def parse_status(homework):
 
 def check_tokens():
     """Проверяем доступность переменных окружения."""
-    error_message = "Unavailable variable"
     tokens_exist = True
     if PRACTICUM_TOKEN is None:
         tokens_exist = False
-        logger.critical(f'{error_message} PRACTICUM_TOKEN')
     if TELEGRAM_TOKEN is None:
         tokens_exist = False
-        logger.critical(f'{error_message} TELEGRAM_TOKEN')
     if TELEGRAM_CHAT_ID is None:
         tokens_exist = False
-        logger.critical(f'{error_message} TELEGRAM_CHAT_ID')
     return tokens_exist
 
 
 def main():
     """Основная логика работы бота."""
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time())
+    current_timestamp = 0
     while True:
         try:
-            response = get_api_answer(current_timestamp)
-            homework = check_response(response)
-            if homework:
-                parse_status_result = parse_status(homework)
-                send_message(bot, parse_status_result)
-            time.sleep(RETRY_TIME)
+            if check_tokens():
+                response = get_api_answer(current_timestamp)
+                homework = check_response(response)
+                if homework:
+                    parse_status_result = parse_status(homework)
+                    send_message(bot, parse_status_result)
+                    current_timestamp = response.get(
+                        'current_date', current_timestamp
+                    )
+                time.sleep(RETRY_TIME)
+            logger.critical("Unavailable variable")
+            raise SystemExit
         except Exception as error:
             logger.error(error, exc_info=True)
             message = f'Сбой в работе программы: {error}'
