@@ -54,26 +54,41 @@ def get_api_answer(current_timestamp):
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
         if response.status_code != HTTPStatus.OK:
-            logger.error('Failed request to API')
-            raise requests.exceptions.RequestException
+            raise Exception('Failed request to API')
         logger.info('Got response')
         return response.json()
     except JSONDecodeError:
         logger.error('JSON Decode Error')
+    except requests.exceptions.HTTPError as HTTPError:
+        status_code = response.status_code
+        logger.error(f'Failed request to API: {HTTPError} {status_code}')
+    except requests.exceptions.ConnectionError as ConnectionError:
+        logger.error(f'Failed request to API: {ConnectionError}')
+    except requests.exceptions.Timeout as Timeout:
+        logger.error(f'Failed request to API: {Timeout}')
+    except requests.exceptions.RequestException as RequestException:
+        logger.error(f'Failed request to API: {RequestException}')
 
 
 def check_response(response):
     """Проверяем ответ API на корректность."""
-    homework = response['homeworks']
-    if 'homeworks' not in response:
-        raise KeyError("Key is not in dict")
-    if homework is None:
-        raise Exception("Homeworks not found")
-    if (type(homework) != list):
-        raise Exception("Homework type is not list")
-    if (len(homework) == 0):
-        raise Exception("Empty homework list")
-    return homework[0]
+    if type(response) == dict:
+        if 'homeworks' in response:
+            homework = response['homeworks']
+            if homework is not None:
+                if (type(homework) == list):
+                    if (len(homework) != 0):
+                        return homework[0]
+                    else:
+                        raise Exception("Empty homework list")
+                else:
+                    raise Exception("Homework type is not list")
+            else:
+                raise Exception("Homeworks not found")
+        else:
+            raise KeyError("Key is not in dict")
+    else:
+        raise TypeError("Response is not dict")
 
 
 def parse_status(homework):
